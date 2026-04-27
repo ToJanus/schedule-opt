@@ -448,7 +448,7 @@ def main():
     setup_logging(args.verbose)
     LOGGER.info("Uruchomienie scheduler.py")
 
-    penalties = load_penalties(args.penalties)
+    penalties = load_penalties(Path(__file__).absolute().parent / args.penalties)
     headers, people_columns, slot_rows, input_rows, preferences_by_slot_person = load_csv(args.input_csv, separator=";")
 
     model, x_first, x_second, on_duty_day = optimize_schedule(

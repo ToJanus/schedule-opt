@@ -232,6 +232,11 @@ def optimize_schedule(people_columns, slot_rows: List[SlotRow], preferences_by_s
         )
         model.addConstr(gp.quicksum(x_first[slot_id, person] for person in people) <= 1, name=f"one_first_{slot_id}")
         model.addConstr(gp.quicksum(x_second[slot_id, person] for person in people) <= 1, name=f"one_second_{slot_id}")
+        model.addConstr(
+            gp.quicksum(x_second[slot_id, person] for person in people)
+            <= gp.quicksum(x_first[slot_id, person] for person in people),
+            name=f"second_requires_first_{slot_id}",
+        )
         for person in people:
             model.addConstr(x_first[slot_id, person] + x_second[slot_id, person] <= 1, name=f"not_both_{slot_id}_{person}")
 

@@ -51,6 +51,7 @@ Przydatne opcje:
 
 Model dąży do:
 1. Obsady każdego slotu co najmniej 1 osobą (najwyższy priorytet).
+   - `2` (druga kolejność) może pojawić się tylko wtedy, gdy w tym samym slocie jest też `1` (pierwsza kolejność).
 2. Maksymalnie 2 osób na slot i maks. 2 osób w całej „dobie dyżurowej” (8:00–8:00) — bez slacków dla tych limitów.
 3. Respektowania preferencji `0/1/2/puste` przez system kar.
 4. Ograniczeń weekendowo-niedzielnych:

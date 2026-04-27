@@ -32,7 +32,7 @@ DEFAULT_PENALTIES = {
     "blank_fallback_first": 180.0,
     "pref2_as_first": 120.0,
     "no_free_sunday": 220.0,
-    "weekend_both_days": 220.0,
+    "weekend_both_days": 320.0,
     "change_between_slots": 35.0,
     "order_change_between_slots": 55.0,
     "fair_total_difference": 25.0,

@@ -253,7 +253,11 @@ def optimize_schedule(people_columns, slot_rows: List[SlotRow], preferences_by_s
         )
         # Jeśli ktoś w danym slocie jest chętny (1/2/P), to puste NIE mogą być użyte jako pierwszy.
         # Jeśli nikt nie jest chętny, allow_blank_fallback może się włączyć i pozwolić na wybór pustej komórki.
-        model.addConstr(allow_blank_fallback[slot_id] <= 0 if willing_people_count > 0 else 1)
+        blank_fallback_upper_bound = 0 if willing_people_count > 0 else 1
+        model.addConstr(
+            allow_blank_fallback[slot_id] <= blank_fallback_upper_bound,
+            name=f"blank_fallback_enabled_only_without_willing_{slot_id}",
+        )
 
         for person in people:
             code = preferences_by_slot_person[(slot_id, person)]

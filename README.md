@@ -58,6 +58,8 @@ Model dąży do:
    - każda osoba ma mieć co najmniej jedną wolną niedzielę (miękko),
    - w jednym weekendzie dana osoba nie powinna mieć dyżuru i w sobotę, i w niedzielę.
 5. Stabilności obsady w obrębie doby dyżurowej (kara za „piłę”).
+   - Dodatkowo model ogranicza zmianę kolejności `1/2` pomiędzy slotami tej samej doby
+     (przekładki są możliwe, ale karane i używane tylko gdy pomagają spełnić ważniejsze reguły).
 6. Sprawiedliwości: wyrównywania liczby dyżurów i liczby pozycji `1` między osobami.
 7. Preferowania większej liczby pozycji `2` i mniejszej liczby pozycji `1` globalnie.
 

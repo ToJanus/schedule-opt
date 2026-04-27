@@ -34,6 +34,7 @@ DEFAULT_PENALTIES = {
     "no_free_sunday": 220.0,
     "weekend_both_days": 220.0,
     "change_between_slots": 35.0,
+    "order_change_between_slots": 55.0,
     "fair_total_difference": 25.0,
     "fair_first_difference": 35.0,
     "first_assignment": 8.0,
@@ -237,6 +238,8 @@ def optimize_schedule(
 
     on_duty_day = model.addVars(duty_days, people, vtype=GRB.BINARY, name="on_duty_day")
     delta_change = model.addVars(slot_ids, people, lb=0.0, vtype=GRB.CONTINUOUS, name="delta_change")
+    delta_order_first = model.addVars(slot_ids, people, lb=0.0, vtype=GRB.CONTINUOUS, name="delta_order_first")
+    delta_order_second = model.addVars(slot_ids, people, lb=0.0, vtype=GRB.CONTINUOUS, name="delta_order_second")
 
     sunday_days = [day for day in duty_days if day.weekday() == 6]
     weekend_ids = sorted(
@@ -339,6 +342,18 @@ def optimize_schedule(
                 model.addConstr(delta_change[next_slot, person] >= lhs_plus)
                 model.addConstr(delta_change[next_slot, person] >= lhs_minus)
 
+                # Dodatkowo pilnujemy stabilności kolejności (1/2) pomiędzy slotami
+                # tej samej doby dyżurowej. Przekładka 1<->2 dostaje karę i jest
+                # dopuszczana tylko wtedy, gdy naprawdę pomaga spełnić inne ograniczenia.
+                first_plus = x_first[next_slot, person] - x_first[current_slot, person]
+                first_minus = x_first[current_slot, person] - x_first[next_slot, person]
+                second_plus = x_second[next_slot, person] - x_second[current_slot, person]
+                second_minus = x_second[current_slot, person] - x_second[next_slot, person]
+                model.addConstr(delta_order_first[next_slot, person] >= first_plus)
+                model.addConstr(delta_order_first[next_slot, person] >= first_minus)
+                model.addConstr(delta_order_second[next_slot, person] >= second_plus)
+                model.addConstr(delta_order_second[next_slot, person] >= second_minus)
+
     # 7) Fairness: wyrównujemy liczbę łącznych dyżurów i liczbę pozycji "1" pomiędzy osobami.
     count_first = {person: gp.quicksum(x_first[slot_id, person] for slot_id in slot_ids) for person in people}
     count_second = {person: gp.quicksum(x_second[slot_id, person] for slot_id in slot_ids) for person in people}
@@ -393,6 +408,11 @@ def optimize_schedule(
     # Jakość grafiku: stabilność i sprawiedliwość.
     objective += penalties["change_between_slots"] * gp.quicksum(
         delta_change[slot_id, person] for slot_id in slot_ids for person in people
+    )
+    objective += penalties["order_change_between_slots"] * gp.quicksum(
+        delta_order_first[slot_id, person] + delta_order_second[slot_id, person]
+        for slot_id in slot_ids
+        for person in people
     )
     objective += penalties["fair_total_difference"] * gp.quicksum(diff_total[pair] for pair in pairs)
     objective += penalties["fair_first_difference"] * gp.quicksum(diff_first[pair] for pair in pairs)

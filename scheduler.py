@@ -76,18 +76,37 @@ def parse_date(value: str) -> dt.date:
 def parse_hours(row: dict) -> Tuple[int, int]:
     """Odczytuje przedział godzin ze slot/start-end/godz_od-godz_do."""
 
+    def parse_hour_value(value: str) -> int:
+        token = (value or "").strip()
+        if not token:
+            raise ValueError("Pusta wartość godziny.")
+
+        if ":" in token:
+            hour_part, minute_part = token.split(":", 1)
+            if not hour_part.isdigit() or not minute_part.isdigit():
+                raise ValueError(f"Niepoprawny format godziny: '{value}'")
+            hour = int(hour_part)
+            minute = int(minute_part)
+            if hour == 24 and minute == 0:
+                return 24
+            if hour < 0 or hour > 23 or minute != 0:
+                raise ValueError(f"Nieobsługiwana godzina: '{value}'. Dozwolone pełne godziny HH:00.")
+            return hour
+
+        return int(token)
+
     normalized_row = {normalize(k): (v or "").strip() for k, v in row.items()}
     if normalized_row.get("start") and normalized_row.get("end"):
-        return int(normalized_row["start"]), int(normalized_row["end"])
+        return parse_hour_value(normalized_row["start"]), parse_hour_value(normalized_row["end"])
     if normalized_row.get("godz_od") and normalized_row.get("godz_do"):
-        return int(normalized_row["godz_od"]), int(normalized_row["godz_do"])
+        return parse_hour_value(normalized_row["godz_od"]), parse_hour_value(normalized_row["godz_do"])
 
     slot_text = normalized_row.get("slot") or normalized_row.get("przedzial") or normalized_row.get("przedział")
     if slot_text:
         clean = slot_text.replace(" ", "")
         if "-" in clean:
             start_str, end_str = clean.split("-", 1)
-            return int(start_str), int(end_str)
+            return parse_hour_value(start_str), parse_hour_value(end_str)
 
     raise ValueError(
         "Brak informacji o przedziale godzin. Użyj kolumn (start,end) lub 'slot'/'przedzial' np. 0-8."

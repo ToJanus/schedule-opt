@@ -36,7 +36,9 @@ DEFAULT_PENALTIES = {
     "change_between_slots": 35.0,
     "order_change_between_slots": 55.0,
     "fair_total_difference": 25.0,
-    "fair_first_difference": 35.0,
+    "fair_first_difference": 8.0,
+    "fair_duty_days_difference": 40.0,
+    "missing_second_when_two_willing": 45.0,
     "first_assignment": 8.0,
     "second_assignment": -6.0,
 }
@@ -354,13 +356,15 @@ def optimize_schedule(
                 model.addConstr(delta_order_second[next_slot, person] >= second_plus)
                 model.addConstr(delta_order_second[next_slot, person] >= second_minus)
 
-    # 7) Fairness: wyrównujemy liczbę łącznych dyżurów i liczbę pozycji "1" pomiędzy osobami.
+    # 7) Fairness: priorytetowo wyrównujemy liczbę dni dyżurowych, a pomocniczo także liczbę slotów/"1".
     count_first = {person: gp.quicksum(x_first[slot_id, person] for slot_id in slot_ids) for person in people}
     count_second = {person: gp.quicksum(x_second[slot_id, person] for slot_id in slot_ids) for person in people}
     count_total = {person: count_first[person] + count_second[person] for person in people}
+    count_duty_days = {person: gp.quicksum(on_duty_day[day, person] for day in duty_days) for person in people}
 
     diff_total = {}
     diff_first = {}
+    diff_duty_days = {}
     pairs = []
     for i in range(len(people)):
         for j in range(i + 1, len(people)):
@@ -368,10 +372,13 @@ def optimize_schedule(
             pairs.append((p, q))
             diff_total[p, q] = model.addVar(lb=0.0, name=f"diff_total_{p}_{q}")
             diff_first[p, q] = model.addVar(lb=0.0, name=f"diff_first_{p}_{q}")
+            diff_duty_days[p, q] = model.addVar(lb=0.0, name=f"diff_duty_days_{p}_{q}")
             model.addConstr(diff_total[p, q] >= count_total[p] - count_total[q])
             model.addConstr(diff_total[p, q] >= count_total[q] - count_total[p])
             model.addConstr(diff_first[p, q] >= count_first[p] - count_first[q])
             model.addConstr(diff_first[p, q] >= count_first[q] - count_first[p])
+            model.addConstr(diff_duty_days[p, q] >= count_duty_days[p] - count_duty_days[q])
+            model.addConstr(diff_duty_days[p, q] >= count_duty_days[q] - count_duty_days[p])
 
     # Funkcja celu (ważona suma kar):
     # - najpierw krytyczne braki (nieobsadzony slot, złamanie "0"),
@@ -405,7 +412,7 @@ def optimize_schedule(
         slack_weekend_both[person, weekend_id] for person in people for weekend_id in weekend_ids
     )
 
-    # Jakość grafiku: stabilność i sprawiedliwość.
+    # Jakość grafiku: stabilność i sprawiedliwość (z priorytetem na równe dni dyżurowe).
     objective += penalties["change_between_slots"] * gp.quicksum(
         delta_change[slot_id, person] for slot_id in slot_ids for person in people
     )
@@ -416,6 +423,18 @@ def optimize_schedule(
     )
     objective += penalties["fair_total_difference"] * gp.quicksum(diff_total[pair] for pair in pairs)
     objective += penalties["fair_first_difference"] * gp.quicksum(diff_first[pair] for pair in pairs)
+    objective += penalties["fair_duty_days_difference"] * gp.quicksum(diff_duty_days[pair] for pair in pairs)
+
+    # Jeśli w slocie są co najmniej 2 osoby z preferencją "1" lub "2",
+    # karz brak obsady pozycji "2" (chcemy maksymalizować liczbę "dwójek" tam, gdzie to naturalne).
+    slots_with_two_primary_willing = [
+        slot_id
+        for slot_id in slot_ids
+        if sum(1 for person in people if preferences_by_slot_person[(slot_id, person)] in {"1", "2"}) >= 2
+    ]
+    objective += penalties["missing_second_when_two_willing"] * gp.quicksum(
+        1 - gp.quicksum(x_second[slot_id, person] for person in people) for slot_id in slots_with_two_primary_willing
+    )
 
     # Globalna preferencja udziału pozycji 1 i 2.
     objective += penalties["first_assignment"] * gp.quicksum(

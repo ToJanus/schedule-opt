@@ -60,8 +60,11 @@ Model dąży do:
 5. Stabilności obsady w obrębie doby dyżurowej (kara za „piłę”).
    - Dodatkowo model ogranicza zmianę kolejności `1/2` pomiędzy slotami tej samej doby
      (przekładki są możliwe, ale karane i używane tylko gdy pomagają spełnić ważniejsze reguły).
-6. Sprawiedliwości: wyrównywania liczby dyżurów i liczby pozycji `1` między osobami.
-7. Preferowania większej liczby pozycji `2` i mniejszej liczby pozycji `1` globalnie.
+6. Sprawiedliwości: **priorytetowo** wyrównywania liczby dni dyżurowych (8:00–8:00) między osobami;
+   dodatkowo model pomocniczo wyrównuje też liczbę slotów i pozycji `1`.
+7. Utrzymywania `1` w każdym slocie i możliwie częstego dokładania `2`:
+   - globalnie premiowane są pozycje `2`,
+   - a dodatkowo model karze brak `2` w slocie, gdzie co najmniej dwie osoby mają w wejściu `1` lub `2`.
 
 ## Wynik
 

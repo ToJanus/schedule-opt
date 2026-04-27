@@ -6,6 +6,7 @@ import configparser
 import csv
 import datetime as dt
 import logging
+import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -178,7 +179,14 @@ def load_csv(input_path: Path, separator: str = ";"):
     return headers, people_columns, slot_rows, input_rows, preferences_by_slot_person
 
 
-def optimize_schedule(people_columns, slot_rows: List[SlotRow], preferences_by_slot_person, mip_gap: float, penalties):
+def optimize_schedule(
+    people_columns,
+    slot_rows: List[SlotRow],
+    preferences_by_slot_person,
+    mip_gap: float,
+    penalties,
+    random_seed: int | None = None,
+):
     """Buduje i rozwiązuje model Gurobi z miękkimi regułami i karami."""
 
     import gurobipy as gp
@@ -380,14 +388,39 @@ def optimize_schedule(people_columns, slot_rows: List[SlotRow], preferences_by_s
 
     model.setObjective(objective, GRB.MINIMIZE)
     model.Params.MIPGap = mip_gap
+    model.Params.PoolSearchMode = 2
+    model.Params.PoolSolutions = 200
+    model.Params.PoolGap = 0.0
     LOGGER.info("Start optymalizacji (MIPGap=%s)", mip_gap)
     model.optimize()
-    LOGGER.info("Koniec optymalizacji. Status=%s, ObjVal=%s", model.Status, getattr(model, "ObjVal", "n/a"))
+    selected_solution_number = 0
+    if model.SolCount > 1 and hasattr(model, "ObjVal"):
+        best_obj = float(model.ObjVal)
+        best_solution_numbers = []
+        for solution_number in range(model.SolCount):
+            model.Params.SolutionNumber = solution_number
+            if abs(float(model.PoolObjVal) - best_obj) <= 1e-6:
+                best_solution_numbers.append(solution_number)
+        if len(best_solution_numbers) > 1:
+            rng = random.Random(random_seed)
+            selected_solution_number = rng.choice(best_solution_numbers)
+        model.Params.SolutionNumber = selected_solution_number
+        LOGGER.info(
+            "Wybrano rozwiązanie z puli: #%d (najlepszych ex aequo: %d, wszystkich w puli: %d)",
+            selected_solution_number,
+            len(best_solution_numbers),
+            model.SolCount,
+        )
+    LOGGER.info(
+        "Koniec optymalizacji. Status=%s, ObjVal=%s",
+        model.Status,
+        getattr(model, "ObjVal", "n/a"),
+    )
 
-    return model, x_first, x_second, on_duty_day
+    return model, x_first, x_second, on_duty_day, selected_solution_number
 
 
-def write_output(output_path: Path, headers, people_columns, input_rows, x_first, x_second):
+def write_output(output_path: Path, headers, people_columns, input_rows, x_first, x_second, selected_solution_number: int):
     """Zapisuje wynik w układzie identycznym jak wejście, z wartościami 1/2/puste."""
 
     with output_path.open("w", encoding="utf-8", newline="") as file_handle:
@@ -397,21 +430,30 @@ def write_output(output_path: Path, headers, people_columns, input_rows, x_first
             output_row = dict(input_row)
             for person in people_columns:
                 is_first = int(round(x_first[slot_idx, person].X))
-                is_second = int(round(x_second[slot_idx, person].X))
+                if selected_solution_number > 0:
+                    is_first = int(round(x_first[slot_idx, person].Xn))
+                    is_second = int(round(x_second[slot_idx, person].Xn))
+                else:
+                    is_second = int(round(x_second[slot_idx, person].X))
                 output_row[person] = "1" if is_first == 1 else ("2" if is_second == 1 else "")
             writer.writerow(output_row)
     LOGGER.info("Zapisano wynikowy CSV do %s", output_path)
 
 
-def summarize(people_columns, slot_rows: List[SlotRow], x_first, x_second, on_duty_day):
+def summarize(people_columns, slot_rows: List[SlotRow], x_first, x_second, on_duty_day, selected_solution_number: int):
     """Wypisuje podsumowanie per osoba: liczba 1, liczba 2, liczba dni dyżurowych."""
 
     duty_days = sorted({row.duty_day for row in slot_rows})
     print("\n=== Podsumowanie osób ===")
     for person in people_columns:
         first_count = sum(int(round(x_first[row.idx, person].X)) for row in slot_rows)
-        second_count = sum(int(round(x_second[row.idx, person].X)) for row in slot_rows)
-        duty_days_count = sum(int(round(on_duty_day[day, person].X)) for day in duty_days)
+        if selected_solution_number > 0:
+            first_count = sum(int(round(x_first[row.idx, person].Xn)) for row in slot_rows)
+            second_count = sum(int(round(x_second[row.idx, person].Xn)) for row in slot_rows)
+            duty_days_count = sum(int(round(on_duty_day[day, person].Xn)) for day in duty_days)
+        else:
+            second_count = sum(int(round(x_second[row.idx, person].X)) for row in slot_rows)
+            duty_days_count = sum(int(round(on_duty_day[day, person].X)) for day in duty_days)
         print(f"{person:>8}: 1-ek={first_count:3d}, 2-ek={second_count:3d}, dni_dyzurowe={duty_days_count:3d}")
 
 
@@ -437,6 +479,9 @@ def setup_logging(verbose: bool):
         level=level,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+    # Gurobi i tak wypisuje swój własny log solvera na stdout.
+    # Wyłączamy duplikaty przez logger Pythona "gurobipy" z prefiksem czasu.
+    logging.getLogger("gurobipy").setLevel(logging.WARNING)
 
 
 def main():
@@ -446,6 +491,7 @@ def main():
     ap.add_argument("input_csv", type=Path, help="Wejściowy plik CSV (separator ;)" )
     ap.add_argument("output_csv", type=Path, help="Wyjściowy plik CSV")
     ap.add_argument("--mip-gap", type=float, default=0.01, help="MIPGap (domyślnie 0.01)")
+    ap.add_argument("--random-seed", type=int, default=None, help="Seed losowania rozwiązania z puli ex aequo.")
     ap.add_argument(
         "--penalties",
         type=Path,
@@ -460,12 +506,13 @@ def main():
     penalties = load_penalties(Path(__file__).absolute().parent / args.penalties)
     headers, people_columns, slot_rows, input_rows, preferences_by_slot_person = load_csv(args.input_csv, separator=";")
 
-    model, x_first, x_second, on_duty_day = optimize_schedule(
+    model, x_first, x_second, on_duty_day, selected_solution_number = optimize_schedule(
         people_columns=people_columns,
         slot_rows=slot_rows,
         preferences_by_slot_person=preferences_by_slot_person,
         mip_gap=args.mip_gap,
         penalties=penalties,
+        random_seed=args.random_seed,
     )
 
     import gurobipy as gp
@@ -473,9 +520,9 @@ def main():
     if model.Status not in {gp.GRB.OPTIMAL, gp.GRB.SUBOPTIMAL, gp.GRB.TIME_LIMIT}:
         raise RuntimeError(f"Optymalizacja nie zakończyła się poprawnie (status={model.Status}).")
 
-    write_output(args.output_csv, headers, people_columns, input_rows, x_first, x_second)
+    write_output(args.output_csv, headers, people_columns, input_rows, x_first, x_second, selected_solution_number)
     print_slack_report(model)
-    summarize(people_columns, slot_rows, x_first, x_second, on_duty_day)
+    summarize(people_columns, slot_rows, x_first, x_second, on_duty_day, selected_solution_number)
     print(f"\nZapisano wynik do: {args.output_csv}")
     LOGGER.info("Zakończono działanie skryptu.")
 
